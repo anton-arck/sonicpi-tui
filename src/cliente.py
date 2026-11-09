@@ -19,6 +19,10 @@ def buscar_daemon(env=None, existe=os.path.exists):
 
 DAEMON = buscar_daemon()
 
+def version_probable(daemon=None):
+    """Version de Sonic Pi que se va a usar, deducida de la ruta del daemon (el arbol app/server/... es el de la 5.x)."""
+    return 5 if "/app/server/ruby/bin/daemon.rb" in (daemon or DAEMON) else 4
+
 
 # ---------- OSC minimo ----------
 def _pad(b):
@@ -167,6 +171,9 @@ class SonicPi:
                 m = re.search(r"eval:(\d+)", html.unescape(str(a[2])))      # la linea real esta en el backtrace
                 linea = m.group(1) if m else a[3]
                 self.al_mensaje("error", f"linea {linea}: " + " ".join(html.unescape(a[1]).replace("[eval] - Thread death!", "").split()))
+            elif d == "/flash" and len(a) >= 3 and a[1] == "eval": self.al_mensaje("flash", int(a[2]))              # solo 5.x: linea (1..) que acaba de sonar
+            elif d == "/live_loop/scope" and len(a) >= 4 and a[2] == "eval": self.al_mensaje("bucle", (str(a[1]), int(a[3])))   # solo 5.x: bucle vivo y su linea
+            elif d == "/live_loop/scope-ended" and len(a) >= 2: self.al_mensaje("bucle_fin", str(a[1]))
             elif d == "/syntax_error" and len(a) >= 4: self.al_mensaje("sintaxis", f"linea {a[3]}: {a[1]} -> {a[2]}")
             elif d == "/exited": self.al_mensaje("log", "Sonic Pi se ha cerrado")
 

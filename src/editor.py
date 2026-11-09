@@ -1,6 +1,7 @@
 """Editor de codigo para Sonic Pi en la terminal, solo teclado. Lanza su propio servidor de Sonic Pi (sin ventana).
 Uso: ./editor.sh [archivo.rb]"""
-import json, os, re, sys, threading
+import json, os, re, sys, threading, time
+from collections import deque
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rich.text import Text
 from textual import work
@@ -11,7 +12,11 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Label, OptionList, RichLog, Static, TextArea
 from textual.widgets.text_area import Selection, TextAreaTheme
 from rich.style import Style
+from rich.color import Color
+from rich.segment import Segment
+from textual.strip import Strip
 import tree_sitter_ruby, tree_sitter
+import cliente
 from cliente import SonicPi, procesos_sonicpi
 import autocompletar
 
@@ -122,6 +127,25 @@ def sangria_tras(antes):
     return sangria
 
 
+FLASH_DUR = 0.4          # segundos que tarda en apagarse el destello de una linea
+BUCLE_CUBO = 0.2         # segundos por casilla de la barra de actividad de cada bucle
+BUCLE_N = 24             # casillas (24 * 0.2 s = ~5 s de historia)
+CHISPAS = "▁▂▃▄▅▆▇█"
+
+def _mezcla(a, b, k):
+    """Color intermedio entre dos colores hex: k=0 -> a, k=1 -> b."""
+    ca, cb = Color.parse(a).get_truecolor(), Color.parse(b).get_truecolor()
+    return Color.from_rgb(*(round(x + (y - x) * k) for x, y in zip(ca, cb)))
+
+def fin_de_bucle(doc, fila):
+    """Fila del `end` que cierra el bloque que empieza en `fila` (mismo sangrado), o `fila` si no se encuentra."""
+    cab = doc.get_line(fila); sang = len(cab) - len(cab.lstrip())
+    for i in range(fila + 1, doc.line_count):
+        l = doc.get_line(i)
+        if l.strip() == "end" and len(l) - len(l.lstrip()) == sang: return i
+    return fila
+
+
 class Codigo(TextArea):
     """Editor modal (normal / insertar / visual) con tecla lider Espacio. Sin Ctrl ni F: solo letras, Espacio y Esc."""
     def __init__(self, *a, **k):
@@ -130,6 +154,8 @@ class Codigo(TextArea):
         self.lider = None; self.ruta_lider = ""
         self.reg = ("", False); self.ancla = (0, 0)
         self.sugs = []; self.sug_i = 0; self.sug_pref = ""; self._sin_sugs = False; self.parada = None
+        self.flashes = {}                       # fila (0..) -> instante del ultimo destello
+        self._timer_flash = None
 
     # ---------- utilidades ----------
     def _L(self, f): return len(self.document.get_line(f))
@@ -202,6 +228,31 @@ class Codigo(TextArea):
             return
         event.stop(); event.prevent_default()
         self._normal(ch)
+
+    # ---------- destellos de lineas (Sonic Pi 5: /flash) ----------
+    def destello(self, fila):
+        self.flashes[fila] = time.monotonic()
+        if self._timer_flash is None: self._timer_flash = self.set_interval(1 / 20, self._tick_flash)
+        else: self._timer_flash.resume()
+        self.refresh()
+
+    def _tick_flash(self):
+        ahora = time.monotonic()
+        self.flashes = {f: t for f, t in self.flashes.items() if ahora - t < FLASH_DUR}
+        if not self.flashes and self._timer_flash is not None: self._timer_flash.pause()
+        self.refresh()
+
+    def render_line(self, y):
+        strip = super().render_line(y)
+        if not self.flashes: return strip
+        t0 = self.flashes.get(y + self.scroll_offset.y)
+        if t0 is None: return strip
+        edad = time.monotonic() - t0
+        if edad >= FLASH_DUR: return strip
+        T = TEMAS[self.app.tema]; k = 0.5 * (1 - edad / FLASH_DUR)
+        fondos = {Color.parse(T["bg"]), Color.parse(T["linea"])}          # solo se tine el fondo normal: el cursor y la seleccion se respetan
+        tinte = _mezcla(T["bg"], T["acento"], k)
+        return Strip([Segment(s.text, s.style + Style(bgcolor=tinte), s.control) if s.style and s.style.bgcolor in fondos else s for s in strip], strip.cell_length)
 
     # ---------- autocompletado ----------
     def on_text_area_selection_changed(self, event):
@@ -468,6 +519,7 @@ class Editor(App):
     Screen { background: $bg; layers: base overlay; }
     #sugs { layer: overlay; position: absolute; display: none; background: $panel; color: $fg; border: none; padding: 0; }
     #cod { height: 1fr; border: none; background: $bg; }
+    #bucles { display: none; height: auto; max-height: 6; background: $panel; color: $fg; padding: 0 1; }
     #log { display: none; height: 9; background: $bg; border-top: solid $borde; padding: 0 1; }
     #log.visible { display: block; }
     #barra { height: 1; background: $barra; color: $fg; padding: 0 1; }
@@ -500,10 +552,13 @@ class Editor(App):
         self.sucio = False
         self._base = ""                      # texto al cargar/guardar: hay cambios solo si el texto difiere
         self._confirma_salir = False
+        self.bucles = {}                       # nombre -> {"fila", "fin", "hist": deque, "cur": golpes en la casilla actual}
+        self._timer_bucles = None
         self._inicial = archivo
 
     def compose(self) -> ComposeResult:
         yield Codigo.code_editor("", language=None, id="cod", tab_behavior="indent", soft_wrap=False)
+        yield Static("", id="bucles")
         yield RichLog(id="log", wrap=True, markup=False, highlight=False, auto_scroll=True)
         yield Static("", id="barra")
         yield Static("", id="ayuda")
@@ -539,8 +594,11 @@ class Editor(App):
     def _arrancar(self):
         viv = procesos_sonicpi()
         if viv:
-            self.call_from_thread(self._log, "Hay Sonic Pi en marcha (cierralo antes): " + viv[0], "red")
-            return
+            if cliente.version_probable() == 5:        # la 5.x convive con otra instancia (cada una usa sus puertos); solo se avisa
+                self.call_from_thread(self._log, "Aviso: hay otra Sonic Pi en marcha (" + viv[0][:60] + "). Conviven, pero si oyes algo que no es tuyo, cierrala.", "yellow")
+            else:
+                self.call_from_thread(self._log, "Hay Sonic Pi en marcha (cierralo antes): " + viv[0], "red")
+                return
         sp = SonicPi(al_mensaje=lambda t, x: self.call_from_thread(self._mensaje, t, x))
         try:
             sp.iniciar()
@@ -553,6 +611,9 @@ class Editor(App):
         self.call_from_thread(self._barra)
 
     def _mensaje(self, tipo, texto):
+        if tipo == "flash": self._flash(texto); return
+        if tipo == "bucle": self._bucle_nuevo(*texto); return
+        if tipo == "bucle_fin": self._bucle_fin(texto); return
         texto = texto.strip().strip('"')
         if tipo == "error":
             self._log(texto, "red"); self._saltar(texto)
@@ -560,37 +621,83 @@ class Editor(App):
         elif tipo == "aviso": self._log(texto, "yellow")
         elif texto: self._log(texto, "white")
 
-    def _saltar(self, texto):                       # lleva el cursor a la linea del error si se ejecuto todo el codigo
+    def _saltar(self, texto):                       # lleva el cursor a la linea del error (los numeros son absolutos: al ejecutar un trozo se rellena con lineas en blanco)
         m = re.match(r"linea (\d+)", texto)
-        if m and not self._ejecutando_seleccion:
+        if m:
             self.query_one("#cod").move_cursor((max(0, int(m.group(1)) - 1), 0))
 
-    _ejecutando_seleccion = False
+    # ---------- destellos y lista de bucles (Sonic Pi 5) ----------
+    def _flash(self, linea):
+        cod = self.query_one("#cod", Codigo); fila = linea - 1
+        if not 0 <= fila < cod.document.line_count: return
+        cod.destello(fila)
+        for b in self.bucles.values():                 # una instruccion interna del bucle (ni la cabecera ni el `end`) = un golpe
+            if b["fila"] < fila < b["fin"]: b["cur"] += 1; break
 
+    def _bucle_nuevo(self, nombre, linea):
+        doc = self.query_one("#cod", Codigo).document; fila = linea - 1
+        if not 0 <= fila < doc.line_count: return
+        b = self.bucles.get(nombre)
+        if b is None:
+            b = self.bucles[nombre] = {"hist": deque([0] * BUCLE_N, maxlen=BUCLE_N), "cur": 0}
+        b["fila"] = fila; b["fin"] = fin_de_bucle(doc, fila)
+        if self._timer_bucles is None: self._timer_bucles = self.set_interval(BUCLE_CUBO, self._tick_bucles)
+        else: self._timer_bucles.resume()
+        self._pintar_bucles()
+
+    def _bucle_fin(self, nombre):
+        self.bucles.pop(nombre, None); self._pintar_bucles()
+
+    def _limpiar_bucles(self):
+        self.bucles.clear(); self.query_one("#cod", Codigo).flashes.clear(); self._pintar_bucles()
+
+    def _tick_bucles(self):
+        for b in self.bucles.values(): b["hist"].append(b["cur"]); b["cur"] = 0
+        self._pintar_bucles()
+
+    def _pintar_bucles(self):
+        w = self.query_one("#bucles", Static)
+        if not self.bucles:
+            w.display = False
+            if self._timer_bucles is not None: self._timer_bucles.pause()
+            return
+        T = TEMAS[self.tema]; texto = Text(); nombres = sorted(self.bucles, key=lambda n: self.bucles[n]["fila"])
+        ancho = max(len(n) for n in nombres)
+        for i, n in enumerate(nombres[:6]):
+            if i == 5 and len(nombres) > 6:
+                texto.append(f"+{len(nombres) - 5} bucles mas", style=T["dim"]); break
+            if i: texto.append("\n")
+            b = self.bucles[n]
+            texto.append("● ", style=T["ok"]); texto.append(n.ljust(ancho), style=f"bold {T['acento']}"); texto.append("  ")
+            for h in b["hist"]:
+                texto.append(CHISPAS[min(h, 4) + 3] if h else CHISPAS[0], style=T["ok"] if h else T["borde"])
+        w.update(texto); w.display = True
     # ---------- acciones ----------
     def ejecutar_nombre(self, nombre):
         if nombre != "salir": self._confirma_salir = False
         getattr(self, "action_" + nombre)()
 
-    def _correr(self, texto, que, parcial):
+    def _correr(self, texto, que, fila_ini=0):
+        """Ejecuta `texto`, que empieza en la fila `fila_ini` (0..) del editor. Se antepone el mismo numero de lineas en blanco para que los
+        numeros de linea del servidor (errores, destellos, bucles) coincidan con los del editor."""
         if not self.listo:
             self._log("El servidor aun no esta listo.", "yellow"); return
         if not texto.strip():
             self._log("Nada que ejecutar.", "yellow"); return
-        self._ejecutando_seleccion = parcial
-        self.sp.ejecutar(texto)
+        self.sp.ejecutar("\n" * fila_ini + texto)
         self._log("> ejecutando " + que, "cyan")
 
     def action_ejecutar(self):
         cod = self.query_one("#cod", Codigo)
         sel = cod.selected_text
-        if sel.strip(): self._correr(sel, "la seleccion", True)
-        else: self._correr(cod.text, "todo", False)
+        if sel.strip(): self._correr(sel, "la seleccion", min(cod.selection.start, cod.selection.end)[0])
+        else: self._correr(cod.text, "todo")
         if cod.modo == "visual": cod.poner_modo("normal")
 
     def action_ejecutar_linea(self):
         cod = self.query_one("#cod", Codigo)
-        self._correr(cod.document.get_line(cod.cursor_location[0]), "la linea", True)
+        f = cod.cursor_location[0]
+        self._correr(cod.document.get_line(f), "la linea", f)
 
     def action_ejecutar_bloque(self):
         cod = self.query_one("#cod", Codigo)
@@ -599,11 +706,11 @@ class Editor(App):
         while a > 0 and doc.get_line(a - 1).strip(): a -= 1
         b = f
         while b < u and doc.get_line(b + 1).strip(): b += 1
-        self._correr("\n".join(doc.get_line(i) for i in range(a, b + 1)), f"el bloque (lineas {a + 1}-{b + 1})", True)
+        self._correr("\n".join(doc.get_line(i) for i in range(a, b + 1)), f"el bloque (lineas {a + 1}-{b + 1})", a)
 
     def action_parar(self):
         if self.listo:
-            self.sp.parar(); self._log("> parado", "cyan")
+            self.sp.parar(); self._limpiar_bucles(); self._log("> parado", "cyan")
 
     def action_volumen_subir(self): self._volumen(0.05)
     def action_volumen_bajar(self): self._volumen(-0.05)

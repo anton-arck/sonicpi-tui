@@ -12,6 +12,7 @@ Hecho con [Textual](https://textual.textualize.io). Probado en Linux (Arch) con 
 - Menú `Espacio` (which-key): ejecutar, parar, guardar, abrir, volumen, temas, paleta de comandos...
 - **Autocompletado** de Ruby y Sonic Pi con conocimiento del contexto: samples tras `sample :`, synths tras `use_synth :`, efectos tras `with_fx :`,
   escalas, acordes y opciones (`amp:`, `release:`...). Tolera escribir sin guion bajo (`liveloop` → `live_loop`) y trae plantillas (`live_loop`, `with_fx`, `define`...).
+- **Con Sonic Pi 5:** las líneas se tiñen un instante cuando suenan (como el destello de la app) y debajo del código aparece la lista de `live_loop` en marcha, cada uno con una barra de actividad de unos 5 s (un golpe por cada `sample`/`play` del bucle). La forma de onda real del mini scope no está: el servidor no la envía por OSC. Al ejecutar solo una selección, un bloque o una línea, se rellena con líneas en blanco para que los números de línea del servidor coincidan con los del editor. Limitación: si insertas o borras líneas por encima de un bucle que sigue sonando, sus destellos se desplazan hasta que lo ejecutes de nuevo.
 - Resaltado de sintaxis Ruby, sangría automática, log opcional y barra de volumen.
 - Temas: `sonicpi`, `matrix` (negro puro, verde neón y marco), `neon` y `ambar`.
 - Los errores se muestran en rojo y el cursor salta a la línea del fallo.
@@ -99,7 +100,7 @@ y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos
 ## Pruebas
 
 ```sh
-for t in prueba_editor prueba_salir prueba_autocompletar prueba_popup prueba_cliente; do .venv/bin/python -I src/$t.py | tail -1; done
+for t in prueba_editor prueba_salir prueba_autocompletar prueba_popup prueba_cliente prueba_flash; do .venv/bin/python -I src/$t.py | tail -1; done
 ```
 
 Las pruebas simulan teclas con el piloto de Textual y no necesitan Sonic Pi ni producen sonido.

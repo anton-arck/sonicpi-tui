@@ -1,9 +1,17 @@
-"""Cliente minimo de Sonic Pi 4.6 (sin ventana). Lanza su propio servidor y habla con el por OSC.
+"""Cliente minimo de Sonic Pi 4.x y 5.x (sin ventana); la version se detecta sola. Lanza su propio servidor y habla con el por OSC.
 Basado en lo que hace /usr/lib/sonic-pi/server/ruby/bin/repl.rb. Solo libreria estandar."""
 import html, os, re, socket, struct, subprocess, threading, time
 
 RUBY = os.environ.get("SONICPI_RUBY", "/usr/bin/ruby")                 # el Ruby del sistema (no el de asdf/rbenv)
-DAEMON = os.environ.get("SONICPI_DAEMON", "/usr/lib/sonic-pi/server/ruby/bin/daemon.rb")
+# Sitios habituales de daemon.rb: 4.x (paquete del sistema) y 5.x (arbol app/server/...). SONICPI_DAEMON manda sobre todos.
+DAEMONS = ["/usr/lib/sonic-pi/server/ruby/bin/daemon.rb", "/usr/lib/sonic-pi/app/server/ruby/bin/daemon.rb",
+           "/usr/share/sonic-pi/app/server/ruby/bin/daemon.rb", "/opt/sonic-pi/app/server/ruby/bin/daemon.rb"]
+
+def buscar_daemon():
+    if os.environ.get("SONICPI_DAEMON"): return os.environ["SONICPI_DAEMON"]
+    return next((d for d in DAEMONS if os.path.exists(d)), DAEMONS[0])
+
+DAEMON = buscar_daemon()
 
 
 # ---------- OSC minimo ----------
@@ -54,43 +62,45 @@ def procesos_sonicpi():
     for linea in salida:
         comm, _, args = linea.strip().partition(" ")
         args = args.strip()
-        if comm in ("sonic-pi", "scsynth", "beam.smp") or (
-                comm.startswith("ruby") and ("sonic-pi/server/ruby/bin/daemon.rb" in args or "sonic-pi/server/ruby/bin/spider-server.rb" in args)):
+        if comm in ("sonic-pi", "scsynth", "beam.smp") or "supersonic" in comm.lower() or (
+                comm.startswith("ruby") and ("server/ruby/bin/daemon.rb" in args or "server/ruby/bin/spider-server.rb" in args)):
             vivos.append(linea.strip()[:100])
     return vivos
 
 
 def leer_puertos(linea):
-    """Interpreta la linea de puertos que imprime daemon.rb de Sonic Pi 4.x: 8 numeros (daemon, escucha, envio, scsynth, cues, tau, tau-phx, token)."""
+    """Interpreta la linea de puertos que imprime daemon.rb y deduce la version por su formato:
+    4.x -> 8 numeros (daemon, escucha, envio, scsynth, cues, tau, tau-phx, token); 5.x -> 6 (sin tau: daemon, escucha, envio, motor, cues, token)."""
     try:
         v = [int(x) for x in linea.split()]
     except ValueError:
         raise RuntimeError(f"el daemon no imprimio los puertos como se esperaba: {linea!r}")
-    if len(v) == 6:
-        raise RuntimeError("Sonic Pi 5 detectado (el daemon imprime 6 valores, no 8). Esta version del editor es solo para Sonic Pi 4.x: "
-                           "usa la rama `sonic-pi-5` del repositorio.")
-    if len(v) < 8:
-        raise RuntimeError(f"linea de puertos inesperada del daemon: {linea!r}")
-    return v[:8]
+    if len(v) == 8: return {"version": 4, "daemon": v[0], "escucha": v[1], "envio": v[2], "motor": v[3], "cues": v[4], "token": v[7]}
+    if len(v) == 6: return {"version": 5, "daemon": v[0], "escucha": v[1], "envio": v[2], "motor": v[3], "cues": v[4], "token": v[5]}
+    raise RuntimeError(f"linea de puertos inesperada del daemon ({len(v)} valores, se esperaban 8 en Sonic Pi 4 o 6 en Sonic Pi 5): {linea!r}")
 
 
 class SonicPi:
     def __init__(self, al_mensaje=None):
         self.al_mensaje = al_mensaje or (lambda tipo, texto: print(f"[{tipo}] {texto}", flush=True))
         self.listo = threading.Event()
-        self.scsynth_listo = threading.Event()
+        self.scsynth_listo = threading.Event()      # el motor de audio esta listo (scsynth en 4.x, SuperSonic en 5.x)
+        self.version = None                         # 4 o 5, segun el daemon
         self._vivo = False
         self.vistos = {}        # direccion OSC -> veces recibida (para diagnostico)
 
     def iniciar(self, timeout=90):
-        self.proc = subprocess.Popen([RUBY, DAEMON], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        entorno = {k: v for k, v in os.environ.items() if k not in ("GEM_PATH", "GEM_HOME")}      # como hace repl.rb de 5.0: los gems del usuario ensucian la salida del daemon
+        self.proc = subprocess.Popen([RUBY, DAEMON], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=entorno)
         linea = self.proc.stdout.readline()
         try:
             v = leer_puertos(linea)
         except RuntimeError:
             self.proc.kill()                    # no dejar el daemon colgado si no lo entendemos
             raise
-        (self.p_daemon, self.p_escucha, self.p_envio, self.p_scsynth, self.p_cues, _tau, _tau2, self.token) = v
+        self.version = v["version"]
+        self.p_daemon, self.p_escucha, self.p_envio, self.p_scsynth, self.p_cues, self.token = (
+            v["daemon"], v["escucha"], v["envio"], v["motor"], v["cues"], v["token"])
         self._vivo = True
         threading.Thread(target=self._drenar_daemon, daemon=True).start()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -136,8 +146,11 @@ class SonicPi:
                 self.al_mensaje("aviso", f"mensaje OSC ilegible: {e}"); continue
             self.vistos[d] = self.vistos.get(d, 0) + 1
             if d == "/ack": self.listo.set()
-            elif d == "/scsynth/info": self.scsynth_listo.set()
-            elif d == "/log/info" and len(a) >= 2: self.al_mensaje("log", a[1])
+            elif d in ("/scsynth/info", "/clockwork/info"): self.scsynth_listo.set()
+            elif d == "/log/info" and len(a) >= 2:
+                if self.version == 5 and "Live Coding begin" in str(a[1]):      # 5.x ya no manda /clockwork/info solo: su arranque sin ventana oficial da el motor por listo con este mensaje
+                    self.scsynth_listo.set()
+                self.al_mensaje("log", a[1])
             elif d == "/log/multi_message" and len(a) > 4:
                 for texto in a[4:]:                  # pares (color:int, texto:str); nos quedamos con los textos
                     if isinstance(texto, str):
@@ -152,7 +165,9 @@ class SonicPi:
     # ---------- API ----------
     def ejecutar(self, codigo): self._enviar_spider("/run-code", self.token, codigo)
     def parar(self): self._enviar_spider("/stop-all-jobs", self.token)
-    def volumen(self, v): self._enviar_spider("/mixer-amp", self.token, float(v), 1)
+    def volumen(self, v):
+        """0..1. En 4.x es /mixer-amp (amplitud); en 5.x /mixer-output-volume (fader tras el limitador)."""
+        self._enviar_spider("/mixer-output-volume" if self.version == 5 else "/mixer-amp", self.token, float(v), 1)
     def grabar_iniciar(self): self._enviar_spider("/start-recording", self.token)
     def grabar_parar(self): self._enviar_spider("/stop-recording", self.token)
     def grabar_guardar(self, ruta): self._enviar_spider("/save-recording", self.token, ruta)
@@ -172,7 +187,7 @@ if __name__ == "__main__":      # prueba silenciosa: solo escribe texto, no suen
     sp = SonicPi()
     print("arrancando servidor (puede tardar)...", flush=True)
     t = time.time(); sp.iniciar()
-    print(f"servidor listo en {time.time()-t:.1f}s | puertos: daemon={sp.p_daemon} envio={sp.p_envio} escucha={sp.p_escucha}", flush=True)
+    print(f"Sonic Pi {sp.version}.x | servidor listo en {time.time()-t:.1f}s | puertos: daemon={sp.p_daemon} envio={sp.p_envio} escucha={sp.p_escucha}", flush=True)
     sp.ejecutar('puts "hola desde Sonic Pi (sin sonido)"\nputs 6 * 7')
     time.sleep(3)
     sp.cerrar()

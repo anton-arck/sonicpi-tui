@@ -4,6 +4,16 @@ from collections import namedtuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sp_datos as D
 
+VERSION = 4          # version de Sonic Pi conectada: con 5 tambien se ofrecen los nombres nuevos de la 5.0 (sp_datos.*_V5)
+
+def usar_version(v):
+    global VERSION
+    VERSION = int(v)
+
+def _dat(nombre):
+    """Nombres de sp_datos (base 4.x) mas, si hay Sonic Pi 5, los que solo existen en la 5.0."""
+    return getattr(D, nombre) + (getattr(D, nombre + "_V5", []) if VERSION >= 5 else [])
+
 Cand = namedtuple("Cand", "nombre tipo ins snippet")     # ins: texto que se inserta; snippet: clave de SNIPPETS o None
 
 RUBY = ["alias", "and", "begin", "break", "case", "class", "def", "do", "else", "elsif", "end", "ensure", "false", "for", "if",
@@ -82,16 +92,16 @@ def candidatos(antes):
         return pref, []                                                  # poniendo nombre a un bucle: no sugerir
     if simbolo:
         ctx = _contexto_simbolo(resto)
-        fuentes = {"sample": [(D.SAMPLES, "sample", 0, "")], "synth": [(D.SYNTHS, "synth", 0, "")],
-                   "fx": [(D.FX, "fx", 0, "")], "escala": [(D.ESCALAS, "escala", 0, "")], "acorde": [(D.ACORDES, "acorde", 0, "")],
-                   None: [(D.SAMPLES, "sample", 1, ""), (D.SYNTHS, "synth", 0, ""), (D.FX, "fx", 2, ""),
-                          (D.ESCALAS, "escala", 3, ""), (D.ACORDES, "acorde", 4, "")]}[ctx]
+        fuentes = {"sample": [(_dat("SAMPLES"), "sample", 0, "")], "synth": [(_dat("SYNTHS"), "synth", 0, "")],
+                   "fx": [(_dat("FX"), "fx", 0, "")], "escala": [(_dat("ESCALAS"), "escala", 0, "")], "acorde": [(_dat("ACORDES"), "acorde", 0, "")],
+                   None: [(_dat("SAMPLES"), "sample", 1, ""), (_dat("SYNTHS"), "synth", 0, ""), (_dat("FX"), "fx", 2, ""),
+                          (_dat("ESCALAS"), "escala", 3, ""), (_dat("ACORDES"), "acorde", 4, "")]}[ctx]
         res = _filtra(pref, fuentes)
         if ctx is None and not pref: return pref, []                    # `:` suelta sin contexto: demasiadas opciones
     else:
         if len(pref) < 2: return pref, []
         tras_coma = resto.rstrip().endswith(",") or resto.rstrip().endswith("(")
-        fuentes = [(list(SNIPPETS), "snippet", 0, ""), (D.FUNCIONES, "sonic pi", 1, ""), (RUBY, "ruby", 2, "")]
+        fuentes = [(list(SNIPPETS), "snippet", 0, ""), (_dat("FUNCIONES"), "sonic pi", 1, ""), (RUBY, "ruby", 2, "")]
         if tras_coma: fuentes.insert(0, (OPCIONES, "opcion", -1, ": "))
         res = _filtra(pref, fuentes)
     if len(res) == 1 and res[0].nombre == pref and res[0].snippet is None: return pref, []    # ya esta escrito completo

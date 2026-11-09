@@ -26,4 +26,12 @@ r.append(check("tras coma ofrece opciones (amp:)", candidatos("sample :bd_haus, 
 r.append(check("ruby: unle -> unless", "unless" in nombres("unle")))
 r.append(check("sample :bd_haus, rel -> release:", any(c.ins == "release: " for c in candidatos("sample :bd_haus, rel")[1])))
 r.append(check("pref devuelto correctamente", candidatos("  use_synth :pro")[0] == "pro" and candidatos("liveloop")[0] == "liveloop"))
+import autocompletar
+r.append(check("4.x: no ofrece funciones que solo existen en la 5.0 (link_audio)", "link_audio" not in nombres("link_a")))
+r.append(check("4.x: no ofrece el fx scope_out", "scope_out" not in nombres("with_fx :scope")))
+autocompletar.usar_version(5)
+r.append(check("5.x: ofrece link_audio", "link_audio" in nombres("link_a")))
+r.append(check("5.x: ofrece el fx scope_out", "scope_out" in nombres("with_fx :scope")))
+r.append(check("5.x: sigue ofreciendo lo de siempre", nombres("liveloop")[:1] == ["live_loop"] and "bd_haus" in nombres("sample :haus")))
+autocompletar.usar_version(4)
 print(f"\n{sum(r)}/{len(r)} comprobaciones correctas")

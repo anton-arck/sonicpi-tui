@@ -18,7 +18,7 @@ Hecho con [Textual](https://textual.textualize.io). Probado en Linux (Arch) con 
 
 ## Requisitos
 
-- **Sonic Pi 4.x** instalado (probado con 4.6; el paquete del sistema, del que usa `daemon.rb` y `scsynth`). **Sonic Pi 5.0 todavía no es compatible** con esta rama: el editor lo detecta y avisa; el soporte se desarrolla en la rama `sonic-pi-5`.
+- **Sonic Pi 4.x o 5.x** instalado (el paquete del sistema; usa su `daemon.rb`). La versión se detecta sola. **4.6 está probada con la app real; el soporte de 5.0 es experimental**: está probado contra un daemon simulado a partir del código fuente de la 5.0, pero no con la app real (pendiente de probar cuando se instale). Si algo falla en 5.0, abre una incidencia con el mensaje del log.
 - Python 3.12 o superior y Ruby del sistema.
 - Cierra la ventana de Sonic Pi antes de abrir el editor: no pueden convivir, porque el editor lanza su propio servidor.
 
@@ -29,7 +29,7 @@ python -m venv .venv
 ./editor.sh [archivo.rb]
 ```
 
-Si Sonic Pi no está en `/usr/lib/sonic-pi` o el Ruby no está en `/usr/bin/ruby`, indícalo con variables de entorno:
+Si Sonic Pi no está en una ruta habitual (`/usr/lib/sonic-pi`, `/opt/sonic-pi`...) o el Ruby no está en `/usr/bin/ruby`, indícalo con variables de entorno:
 
 ```sh
 SONICPI_DAEMON=/ruta/a/sonic-pi/server/ruby/bin/daemon.rb SONICPI_RUBY=/ruta/a/ruby ./editor.sh
@@ -68,7 +68,7 @@ Solo letras, `Espacio` y `Esc`. La barra inferior muestra el modo; la ayuda de t
 
 En modo insertar aparece una lista junto al cursor. `Tab` acepta, `↑`/`↓` eligen. Las plantillas dejan el nombre seleccionado para escribirlo
 y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos, funciones, escalas y acordes salen del Sonic Pi instalado:
-`.venv/bin/python -I src/generar_datos.py` regenera `src/sp_datos.py` (ajusta las rutas del principio del script si tu instalación es distinta).
+`.venv/bin/python -I src/generar_datos.py [--v5 RAIZ_DEL_CODIGO_DE_SONIC_PI_5]` regenera `src/sp_datos.py` (ajusta las rutas del script si tu instalación es distinta). Lo que solo existe en la 5.0 se ofrece únicamente si el editor detecta Sonic Pi 5.
 
 ## Estructura
 
@@ -77,7 +77,8 @@ y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos
 | `src/editor.py` | el editor (interfaz, modos, temas, popup) |
 | `src/autocompletar.py` | lógica del autocompletado, sin interfaz |
 | `src/sp_datos.py` | nombres de Sonic Pi 4.6 (generado) |
-| `src/cliente.py` | servidor de Sonic Pi sin ventana y cliente OSC: ejecutar, parar, volumen y logs |
+| `src/cliente.py` | servidor de Sonic Pi sin ventana y cliente OSC (4.x y 5.x): ejecutar, parar, volumen y logs |
+| `src/falso_daemon.py` | daemon simulado de Sonic Pi 4/5 para probar el cliente sin audio |
 | `src/generar_datos.py` | regenera `sp_datos.py` |
 | `src/prueba_*.py` | pruebas automáticas, sin audio |
 

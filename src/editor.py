@@ -548,7 +548,8 @@ class Editor(App):
             self.call_from_thread(self._log, f"No arranco: {e}", "red"); return
         sp.volumen(self.volumen)
         self.sp = sp; self.listo = True
-        self.call_from_thread(self._log, "Sonic Pi listo. Espacio r para ejecutar.", "green")
+        autocompletar.usar_version(sp.version)
+        self.call_from_thread(self._log, f"Sonic Pi {sp.version}.x listo. Espacio r para ejecutar.", "green")
         self.call_from_thread(self._barra)
 
     def _mensaje(self, tipo, texto):

@@ -96,5 +96,7 @@ cada pocos segundos) y escucha los mensajes de log y error. Es el mismo protocol
 
 ## Licencia y créditos
 
+Licencia MIT (ver `LICENSE`).
+
 Sonic Pi es de Sam Aaron y colaboradores (licencia MIT). Este proyecto no incluye su código: solo se comunica con una instalación existente
 y extrae nombres de su documentación para el autocompletado.

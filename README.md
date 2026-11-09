@@ -18,7 +18,7 @@ Hecho con [Textual](https://textual.textualize.io). Probado en Linux (Arch) con 
 
 ## Requisitos
 
-- Sonic Pi 4.x instalado (el paquete del sistema; usa su `daemon.rb` y `scsynth`).
+- **Sonic Pi 4.x** instalado (probado con 4.6; el paquete del sistema, del que usa `daemon.rb` y `scsynth`). **Sonic Pi 5.0 todavía no es compatible** con esta rama: el editor lo detecta y avisa; el soporte se desarrolla en la rama `sonic-pi-5`.
 - Python 3.12 o superior y Ruby del sistema.
 - Cierra la ventana de Sonic Pi antes de abrir el editor: no pueden convivir, porque el editor lanza su propio servidor.
 
@@ -84,7 +84,7 @@ y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos
 ## Pruebas
 
 ```sh
-for t in prueba_editor prueba_salir prueba_autocompletar prueba_popup; do .venv/bin/python -I src/$t.py | tail -1; done
+for t in prueba_editor prueba_salir prueba_autocompletar prueba_popup prueba_cliente; do .venv/bin/python -I src/$t.py | tail -1; done
 ```
 
 Las pruebas simulan teclas con el piloto de Textual y no necesitan Sonic Pi ni producen sonido.

@@ -60,6 +60,20 @@ def procesos_sonicpi():
     return vivos
 
 
+def leer_puertos(linea):
+    """Interpreta la linea de puertos que imprime daemon.rb de Sonic Pi 4.x: 8 numeros (daemon, escucha, envio, scsynth, cues, tau, tau-phx, token)."""
+    try:
+        v = [int(x) for x in linea.split()]
+    except ValueError:
+        raise RuntimeError(f"el daemon no imprimio los puertos como se esperaba: {linea!r}")
+    if len(v) == 6:
+        raise RuntimeError("Sonic Pi 5 detectado (el daemon imprime 6 valores, no 8). Esta version del editor es solo para Sonic Pi 4.x: "
+                           "usa la rama `sonic-pi-5` del repositorio.")
+    if len(v) < 8:
+        raise RuntimeError(f"linea de puertos inesperada del daemon: {linea!r}")
+    return v[:8]
+
+
 class SonicPi:
     def __init__(self, al_mensaje=None):
         self.al_mensaje = al_mensaje or (lambda tipo, texto: print(f"[{tipo}] {texto}", flush=True))
@@ -71,10 +85,12 @@ class SonicPi:
     def iniciar(self, timeout=90):
         self.proc = subprocess.Popen([RUBY, DAEMON], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         linea = self.proc.stdout.readline()
-        v = [int(x) for x in linea.split()]
-        if len(v) < 8:
-            raise RuntimeError(f"linea de puertos inesperada del daemon: {linea!r}")
-        (self.p_daemon, self.p_escucha, self.p_envio, self.p_scsynth, self.p_cues, _tau, _tau2, self.token) = v[:8]
+        try:
+            v = leer_puertos(linea)
+        except RuntimeError:
+            self.proc.kill()                    # no dejar el daemon colgado si no lo entendemos
+            raise
+        (self.p_daemon, self.p_escucha, self.p_envio, self.p_scsynth, self.p_cues, _tau, _tau2, self.token) = v
         self._vivo = True
         threading.Thread(target=self._drenar_daemon, daemon=True).start()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

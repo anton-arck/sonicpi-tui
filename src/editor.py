@@ -18,6 +18,7 @@ import tree_sitter_ruby, tree_sitter
 import cliente
 from cliente import SonicPi, procesos_sonicpi
 import autocompletar
+import osciloscopio
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CARPETA = os.path.join(RAIZ, "codigo")
@@ -43,7 +44,7 @@ MENU = {
     "s": ("parar", "parar"), "w": ("guardar", "guardar"), "n": ("nuevo", "nuevo"),
     "f": ("archivo", {"f": ("abrir", "abrir"), "n": ("nuevo", "nuevo"), "s": ("guardar", "guardar")}),
     "v": ("volumen", {"u": ("subir", "volumen_subir"), "d": ("bajar", "volumen_bajar")}),
-    "o": ("opciones", {"l": ("mostrar/ocultar log", "log"), "p": ("mostrar/ocultar pasos", "pasos")}),
+    "o": ("opciones", {"l": ("mostrar/ocultar log", "log"), "p": ("mostrar/ocultar pasos", "pasos"), "o": ("osciloscopio", "osciloscopio")}),
     "t": ("tema", "tema"), "p": ("paleta", "paleta"), "?": ("ayuda", "ayuda_completa"), "q": ("salir", "salir"),
 }
 COMPLETA = [
@@ -570,6 +571,7 @@ class Editor(App):
         self.pasos_visibles = bool(cfg.get("pasos", False))        # linea de 16 pasos junto a cada live_loop: desactivada por defecto
         self.ultimo_archivo = cfg.get("ultimo")
         self.ultimo = ("", "dim")
+        self._scope = None                     # panel de scope-tui abierto por nosotros
         super().__init__()
         self.con_servidor = con_servidor
         self.sp = None
@@ -795,6 +797,14 @@ class Editor(App):
     def action_log(self):
         self._mostrar_log(not self.log_visible); self._guardar_config()
 
+    def action_osciloscopio(self):
+        """Abre o cierra scope-tui (osciloscopio externo) en un panel de zellij/tmux."""
+        if self._scope is not None:
+            hubo = osciloscopio.cerrar(self._scope); self._scope = None
+            if hubo: self._log("osciloscopio cerrado", "cyan"); return          # si ya no estaba (se cerro con q), esta pulsacion lo abre de nuevo
+        self._scope, msg = osciloscopio.abrir()
+        self._log(msg, "cyan" if self._scope else "yellow")
+
     def action_pasos(self):
         self.pasos_visibles = not self.pasos_visibles; self._guardar_config(); self.query_one("#cod", Codigo).refresh()
         self._log("pasos " + ("activados" if self.pasos_visibles else "desactivados"), "cyan")
@@ -855,6 +865,7 @@ class Editor(App):
         if self.sucio and not self._confirma_salir:
             self._confirma_salir = True
             self._log("Cambios sin guardar: Espacio w guarda · Espacio q otra vez sale sin guardar.", "yellow"); return
+        if self._scope is not None: osciloscopio.cerrar(self._scope)
         if self.sp:
             threading.Thread(target=self.sp.cerrar, daemon=True).start()
             import time; time.sleep(0.5)

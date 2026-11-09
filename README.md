@@ -74,6 +74,7 @@ Solo letras, `Espacio` y `Esc`. La barra inferior muestra el modo; la ayuda de t
 | `v u` / `v d` | volumen + / - |
 | `o l` | mostrar / ocultar el log (un error lo abre solo) |
 | `o p` | mostrar / ocultar la línea de 16 pasos de los bucles (Sonic Pi 5) |
+| `o o` | abrir / cerrar el osciloscopio: [scope-tui](https://github.com/alemidev/scope-tui) en un panel de zellij o tmux (mezcla de salida del sistema) |
 | `t` | elegir tema (`j k` previsualiza, Enter lo guarda) |
 | `p` | paleta de comandos |
 | `?` | hoja de atajos en el log |
@@ -92,6 +93,7 @@ y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos
 | `src/editor.py` | el editor (interfaz, modos, temas, popup) |
 | `src/autocompletar.py` | lógica del autocompletado, sin interfaz |
 | `src/sp_datos.py` | nombres de Sonic Pi 4.6 (generado) |
+| `src/osciloscopio.py` | abre y cierra scope-tui en un panel de zellij/tmux |
 | `src/cliente.py` | servidor de Sonic Pi sin ventana y cliente OSC (4.x y 5.x): ejecutar, parar, volumen y logs |
 | `tools/aislar-sonicpi.sh` | copia aislada del Sonic Pi 4.x |
 | `src/falso_daemon.py` | daemon simulado de Sonic Pi 4/5 para probar el cliente sin audio |
@@ -101,7 +103,7 @@ y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos
 ## Pruebas
 
 ```sh
-for t in prueba_editor prueba_salir prueba_autocompletar prueba_popup prueba_cliente prueba_flash; do .venv/bin/python -I src/$t.py | tail -1; done
+for t in prueba_editor prueba_salir prueba_autocompletar prueba_popup prueba_cliente prueba_flash prueba_osciloscopio; do .venv/bin/python -I src/$t.py | tail -1; done
 ```
 
 Las pruebas simulan teclas con el piloto de Textual y no necesitan Sonic Pi ni producen sonido.

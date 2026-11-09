@@ -12,7 +12,7 @@ Hecho con [Textual](https://textual.textualize.io). Probado en Linux (Arch) con 
 - Menú `Espacio` (which-key): ejecutar, parar, guardar, abrir, volumen, temas, paleta de comandos...
 - **Autocompletado** de Ruby y Sonic Pi con conocimiento del contexto: samples tras `sample :`, synths tras `use_synth :`, efectos tras `with_fx :`,
   escalas, acordes y opciones (`amp:`, `release:`...). Tolera escribir sin guion bajo (`liveloop` → `live_loop`) y trae plantillas (`live_loop`, `with_fx`, `define`...).
-- **Con Sonic Pi 5:** las líneas se tiñen un instante cuando suenan (como el destello de la app) y a la derecha de cada `live_loop` se dibuja una **línea de 16 pasos**, como un secuenciador: cada vuelta del bucle se divide en 16, los pasos donde suena un `sample` o un `play` (aprendidos de la vuelta anterior) se marcan en verde y un cursor ilumina el paso que va sonando. Debajo del código queda una fila con los nombres de los bucles en marcha. Sustituye al mini scope con la forma de onda, que el servidor no envía por OSC. Al ejecutar solo una selección, un bloque o una línea se rellena con líneas en blanco para que los números de línea del servidor coincidan con los del editor. Limitaciones: si insertas o borras líneas por encima de un bucle que sigue sonando, sus destellos se desplazan hasta que lo ejecutes de nuevo; los bucles con `sleep` aleatorio o con muchas variaciones muestran el patrón de la última vuelta; y la línea de pasos no se dibuja si la cabecera del bucle es tan larga que taparía código.
+- **Con Sonic Pi 5:** las líneas se tiñen un instante cuando suenan (como el destello de la app) y a la derecha de cada `live_loop` se dibuja una **línea de 16 pasos**, como un secuenciador: cada vuelta del bucle se divide en 16, los pasos donde suena un `sample` o un `play` (aprendidos de la vuelta anterior) se marcan en verde y un cursor ilumina el paso que va sonando. Debajo del código queda una fila con los nombres de los bucles en marcha. A su izquierda se dibuja la **forma de onda real del bucle** (envolvente de sus últimos ~0,34 s en 16 celdas `▁▂▃…█`, lo más reciente a la derecha), leída directamente de la memoria compartida del motor (`/dev/shm/SuperSonic_<puerto>`, solo lectura): el servidor no la envía por OSC. Ese formato es interno de SuperSonic 5.0; si el segmento no existe o no coincide, la onda se omite sin errores. Si falta anchura, la onda es lo primero que desaparece. Al ejecutar solo una selección, un bloque o una línea se rellena con líneas en blanco para que los números de línea del servidor coincidan con los del editor. Limitaciones: si insertas o borras líneas por encima de un bucle que sigue sonando, sus destellos se desplazan hasta que lo ejecutes de nuevo; los bucles con `sleep` aleatorio o con muchas variaciones muestran el patrón de la última vuelta; y la línea de pasos no se dibuja si la cabecera del bucle es tan larga que taparía código.
 - Resaltado de sintaxis Ruby, sangría automática, log opcional y barra de volumen.
 - Temas: `sonicpi`, `matrix` (negro puro, verde neón y marco), `neon` y `ambar`.
 - Los errores se muestran en rojo y el cursor salta a la línea del fallo.
@@ -91,6 +91,7 @@ y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos
 | `src/editor.py` | el editor (interfaz, modos, temas, popup) |
 | `src/autocompletar.py` | lógica del autocompletado, sin interfaz |
 | `src/sp_datos.py` | nombres de Sonic Pi 4.6 (generado) |
+| `src/osciloscopio.py` | lector de la onda de cada bucle en la memoria compartida de SuperSonic (5.x) |
 | `src/cliente.py` | servidor de Sonic Pi sin ventana y cliente OSC (4.x y 5.x): ejecutar, parar, volumen y logs |
 | `tools/aislar-sonicpi.sh` | copia aislada del Sonic Pi 4.x |
 | `src/falso_daemon.py` | daemon simulado de Sonic Pi 4/5 para probar el cliente sin audio |
@@ -100,7 +101,7 @@ y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos
 ## Pruebas
 
 ```sh
-for t in prueba_editor prueba_salir prueba_autocompletar prueba_popup prueba_cliente prueba_flash; do .venv/bin/python -I src/$t.py | tail -1; done
+for t in prueba_editor prueba_salir prueba_autocompletar prueba_popup prueba_cliente prueba_flash prueba_onda; do .venv/bin/python -I src/$t.py | tail -1; done
 ```
 
 Las pruebas simulan teclas con el piloto de Textual y no necesitan Sonic Pi ni producen sonido.

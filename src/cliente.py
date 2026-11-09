@@ -172,7 +172,7 @@ class SonicPi:
                 linea = m.group(1) if m else a[3]
                 self.al_mensaje("error", f"linea {linea}: " + " ".join(html.unescape(a[1]).replace("[eval] - Thread death!", "").split()))
             elif d == "/flash" and len(a) >= 3 and a[1] == "eval": self.al_mensaje("flash", (int(a[2]), time.monotonic()))              # solo 5.x: (linea 1.., instante de llegada); el servidor lo manda a la hora a la que suena
-            elif d == "/live_loop/scope" and len(a) >= 4 and a[2] == "eval": self.al_mensaje("bucle", (str(a[1]), int(a[3])))   # solo 5.x: bucle vivo y su linea
+            elif d == "/live_loop/scope" and len(a) >= 4 and a[2] == "eval": self.al_mensaje("bucle", (str(a[1]), int(a[3]), int(a[4]) if len(a) > 4 else None))   # solo 5.x: bucle vivo, su linea y su slot de scope
             elif d == "/live_loop/scope-ended" and len(a) >= 2: self.al_mensaje("bucle_fin", str(a[1]))
             elif d == "/syntax_error" and len(a) >= 4: self.al_mensaje("sintaxis", f"linea {a[3]}: {a[1]} -> {a[2]}")
             elif d == "/exited": self.al_mensaje("log", "Sonic Pi se ha cerrado")

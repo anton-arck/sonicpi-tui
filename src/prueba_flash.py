@@ -8,6 +8,7 @@ from rich.color import Color
 from textual.widgets.text_area import Selection
 editor.ARCHIVO_TEMA = os.path.join(tempfile.mkdtemp(), "tema.json")          # no tocar la configuracion real
 
+def cliente_cfg(): return editor.cargar_config()
 def check(n, ok): print(("OK    " if ok else "FALLA ") + n); return bool(ok)
 SEQ = "live_loop :seq do\n  sample :bd_haus\n  sleep 0.5\n  sample :sn_dub\n  sleep 0.25\n  sample :drum_cymbal_closed\n  sleep 0.25\nend\n"
 CODIGO = "live_loop :bombo do\n  sample :bd_haus\n  sleep 0.5\nend\n\nlive_loop :nota do\n  play 60\n  sleep 1\nend\n"
@@ -55,6 +56,8 @@ async def main():
         # ---- bucles: lista de nombres y linea de pasos
         r.append(check("sin bucles el panel esta oculto", not app.query_one("#bucles").display))
         app._poner(SEQ); await p.pause()
+        r.append(check("los pasos vienen desactivados", not app.pasos_visibles))
+        app.ejecutar_nombre("pasos"); r.append(check("Espacio o p los activa y se guarda", app.pasos_visibles and cliente_cfg()["pasos"] is True))
         app._mensaje("bucle", ("seq", 1))
         b = app.bucles["seq"]
         r.append(check("bucle: cabecera en la fila 0 y su end en la fila 7", b["fila"] == 0 and b["fin"] == 7))

@@ -18,7 +18,6 @@ import tree_sitter_ruby, tree_sitter
 import cliente
 from cliente import SonicPi, procesos_sonicpi
 import autocompletar
-import osciloscopio
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CARPETA = os.path.join(RAIZ, "codigo")
@@ -44,7 +43,7 @@ MENU = {
     "s": ("parar", "parar"), "w": ("guardar", "guardar"), "n": ("nuevo", "nuevo"),
     "f": ("archivo", {"f": ("abrir", "abrir"), "n": ("nuevo", "nuevo"), "s": ("guardar", "guardar")}),
     "v": ("volumen", {"u": ("subir", "volumen_subir"), "d": ("bajar", "volumen_bajar")}),
-    "o": ("opciones", {"l": ("mostrar/ocultar log", "log")}),
+    "o": ("opciones", {"l": ("mostrar/ocultar log", "log"), "p": ("mostrar/ocultar pasos", "pasos")}),
     "t": ("tema", "tema"), "p": ("paleta", "paleta"), "?": ("ayuda", "ayuda_completa"), "q": ("salir", "salir"),
 }
 COMPLETA = [
@@ -154,14 +153,6 @@ def segmentos_pasos(b, ahora, T, fondo):
     segs.append(Segment(" ", Style(bgcolor=fondo)))
     return segs
 ANCHO_PASOS = 1 + PASOS + 3 + 1
-ANCHO_ONDA = osciloscopio.COLUMNAS + 1
-
-def segmentos_onda(b, T, fondo):
-    """Forma de la onda del bucle (envolvente de sus ultimos ~0,34 s) en 16 celdas y un espacio: 17 celdas."""
-    niv = b.get("onda") or [0] * osciloscopio.COLUMNAS
-    segs = [Segment(osciloscopio.NIVELES[n - 1] if n else "▁", Style(color=T["ok"] if n else T["borde"], bgcolor=fondo)) for n in niv]
-    segs.append(Segment(" ", Style(bgcolor=fondo)))
-    return segs
 
 def fin_de_bucle(doc, fila):
     """Fila del `end` que cierra el bloque que empieza en `fila` (mismo sangrado), o `fila` si no se encuentra."""
@@ -279,17 +270,14 @@ class Codigo(TextArea):
             tinte = _mezcla(T["bg"], T["acento"], k)
             strip = Strip([Segment(s.text, s.style + Style(bgcolor=tinte), s.control) if s.style and s.style.bgcolor in fondos else s for s in strip], strip.cell_length)
         # linea de pasos a la derecha de la cabecera de cada live_loop (como el mini scope de la app), si cabe sin tapar codigo
-        for bucle in self.app.bucles.values():
+        for bucle in (self.app.bucles.values() if self.app.pasos_visibles else ()):
             if bucle["fila"] == fila and self.scroll_offset.x == 0:
                 vis = min(strip.cell_length, self.scrollable_content_region.width)       # el strip es algo mas ancho que el area visible
-                libre = vis - self.gutter_width - len(self.document.get_line(fila)) - 2
-                onda = bucle.get("onda") is not None and libre >= ANCHO_PASOS + ANCHO_ONDA          # la onda es lo primero que se quita si falta sitio
-                ancho = ANCHO_PASOS + (ANCHO_ONDA if onda else 0)
-                if vis > ancho and libre >= ancho:
-                    izq = strip.crop(0, vis - ancho)
+                if vis > ANCHO_PASOS and self.gutter_width + len(self.document.get_line(fila)) + 2 <= vis - ANCHO_PASOS:
+                    izq = strip.crop(0, vis - ANCHO_PASOS)
                     ultimo = izq._segments[-1].style if izq._segments else None
                     fondo = (ultimo.bgcolor if ultimo and ultimo.bgcolor else Color.parse(T["bg"]))
-                    return Strip([*izq, *(segmentos_onda(bucle, T, fondo) if onda else []), *segmentos_pasos(bucle, time.monotonic(), T, fondo)], vis).adjust_cell_length(strip.cell_length, Style(bgcolor=fondo))
+                    return Strip([*izq, *segmentos_pasos(bucle, time.monotonic(), T, fondo)], vis).adjust_cell_length(strip.cell_length, Style(bgcolor=fondo))
         return strip
 
     # ---------- autocompletado ----------
@@ -579,6 +567,7 @@ class Editor(App):
         cfg = cargar_config()
         self.tema = cfg.get("tema") if cfg.get("tema") in TEMAS else "sonicpi"
         self.log_visible = bool(cfg.get("log", False))
+        self.pasos_visibles = bool(cfg.get("pasos", False))        # linea de 16 pasos junto a cada live_loop: desactivada por defecto
         self.ultimo_archivo = cfg.get("ultimo")
         self.ultimo = ("", "dim")
         super().__init__()
@@ -592,7 +581,6 @@ class Editor(App):
         self._confirma_salir = False
         self.bucles = {}                       # nombre -> {"fila", "fin", "t0": inicio de la vuelta, "periodo", "actual": golpes de la vuelta en curso (s), "patron": pasos con golpe de la vuelta anterior}
         self._timer_bucles = None
-        self._osc = None                       # lector de la memoria compartida de SuperSonic (onda de cada bucle, solo 5.x)
         self._inicial = archivo
 
     def compose(self) -> ComposeResult:
@@ -685,13 +673,12 @@ class Editor(App):
             b["patron"] = {round(o / dt * PASOS) % PASOS for o in b["actual"]}      # redondeo: un golpe en el instante 0 puede llegar justo antes que la cabecera
         b["t0"] = t; b["actual"] = []
 
-    def _bucle_nuevo(self, nombre, linea, slot=None):
+    def _bucle_nuevo(self, nombre, linea):
         doc = self.query_one("#cod", Codigo).document; fila = linea - 1
         if not 0 <= fila < doc.line_count: return
         b = self.bucles.get(nombre)
         if b is None:
-            b = self.bucles[nombre] = {"t0": None, "periodo": None, "actual": [], "patron": set(), "onda": None}
-        b["slot"] = slot
+            b = self.bucles[nombre] = {"t0": None, "periodo": None, "actual": [], "patron": set()}
         b["fila"] = fila; b["fin"] = fin_de_bucle(doc, fila)
         if self._timer_bucles is None: self._timer_bucles = self.set_interval(1 / 20, self._tick_bucles)
         else: self._timer_bucles.resume()
@@ -703,19 +690,8 @@ class Editor(App):
     def _limpiar_bucles(self):
         self.bucles.clear(); self.query_one("#cod", Codigo).flashes.clear(); self._pintar_bucles()
 
-    def _leer_ondas(self):
-        """Actualiza la onda de cada bucle desde la memoria compartida del motor; sin segmento o sin slot, la onda se omite."""
-        if self._osc is None:
-            puerto = getattr(self.sp, "p_scsynth", None)
-            if not puerto or getattr(self.sp, "version", 4) < 5: return
-            self._osc = osciloscopio.Osciloscopio.del_motor(puerto)
-        for b in self.bucles.values():
-            m = self._osc.muestras(b["slot"]) if b.get("slot") is not None else None
-            b["onda"] = osciloscopio.niveles_texto(osciloscopio.envolvente(m)) if m else None
-
     def _tick_bucles(self):
-        self._leer_ondas()
-        self.query_one("#cod", Codigo).refresh()          # mueve el cursor de la linea de pasos y la onda
+        self.query_one("#cod", Codigo).refresh()          # mueve el cursor de la linea de pasos
 
     def _pintar_bucles(self):
         """Fila con los nombres de los bucles en marcha (su linea de pasos se dibuja junto a su cabecera, en Codigo.render_line)."""
@@ -819,13 +795,17 @@ class Editor(App):
     def action_log(self):
         self._mostrar_log(not self.log_visible); self._guardar_config()
 
+    def action_pasos(self):
+        self.pasos_visibles = not self.pasos_visibles; self._guardar_config(); self.query_one("#cod", Codigo).refresh()
+        self._log("pasos " + ("activados" if self.pasos_visibles else "desactivados"), "cyan")
+
     def _mostrar_log(self, v):
         self.log_visible = v
         self.query_one("#log").set_class(v, "visible")
         self._barra()
 
     def _guardar_config(self):
-        try: json.dump({"tema": self.tema, "log": self.log_visible, "ultimo": self.ultimo_archivo}, open(ARCHIVO_TEMA, "w"))
+        try: json.dump({"tema": self.tema, "log": self.log_visible, "pasos": self.pasos_visibles, "ultimo": self.ultimo_archivo}, open(ARCHIVO_TEMA, "w"))
         except OSError as e: self._log(f"no se pudo guardar la configuracion: {e}", "red")
 
     def action_guardar(self):

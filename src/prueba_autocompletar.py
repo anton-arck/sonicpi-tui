@@ -1,0 +1,29 @@
+"""Prueba de la logica de autocompletado. Uso: .venv/bin/python -I src/prueba_autocompletar.py"""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from autocompletar import candidatos
+def nombres(t): return [c.nombre for c in candidatos(t)[1]]
+def check(n, ok): print(("OK    " if ok else "FALLA ") + n); return bool(ok)
+r = []
+r.append(check("liveloop (sin guion bajo) -> live_loop", nombres("liveloop")[:1] == ["live_loop"]))
+r.append(check("live_l -> live_loop primero y es snippet", candidatos("live_l")[1][0].snippet == "live_loop"))
+r.append(check("lvlp (difuso) encuentra live_loop", "live_loop" in nombres("lvlp")))
+r.append(check("sample :bd_ -> samples bd_*", nombres("  sample :bd_")[:3] == ["bd_805", "bd_ada", "bd_boom"] or all(n.startswith("bd_") for n in nombres("  sample :bd_")[:5])))
+r.append(check("sample : (vacio) lista samples", len(nombres("sample :")) > 20 and "bd_haus" in nombres("sample :")))
+r.append(check("sample :haus encuentra bd_haus (contiene)", "bd_haus" in nombres("sample :haus")))
+r.append(check("use_synth :pro -> prophet", nombres("use_synth :pro")[0] == "prophet"))
+r.append(check("synth :  solo synths", all(c.tipo == "synth" for c in candidatos("synth :")[1])))
+r.append(check("with_fx :rev -> reverb", nombres("with_fx :rev")[0] == "reverb"))
+r.append(check("scale(:e3, :min -> escalas", nombres("play scale(:e3, :min")[0] in ("minor", "minor_pentatonic") and all(c.tipo == "escala" for c in candidatos("scale(:e3, :min")[1])))
+r.append(check("chord(:e3, :maj -> acordes", all(c.tipo == "acorde" for c in candidatos("chord(:e3, :maj")[1]) and "major7" in nombres("chord(:e3, :maj")))
+r.append(check("play_p -> play_pattern", "play_pattern" in nombres("play_p")))
+r.append(check("una letra no sugiere funciones", nombres("p") == []))
+r.append(check("comentario: sin sugerencias", nombres("# live_l") == []))
+r.append(check("cadena: sin sugerencias", nombres('puts "live_l') == []))
+r.append(check("nombrando un live_loop no sugiere", nombres("live_loop :mel") == []))
+r.append(check("palabra completa unica no molesta", nombres("sleep") == [] or nombres("sleep")[0] != "sleep" or len(nombres("sleep")) > 1))
+r.append(check("tras coma ofrece opciones (amp:)", candidatos("sample :bd_haus, am")[1][0].ins == "amp: "))
+r.append(check("ruby: unle -> unless", "unless" in nombres("unle")))
+r.append(check("sample :bd_haus, rel -> release:", any(c.ins == "release: " for c in candidatos("sample :bd_haus, rel")[1])))
+r.append(check("pref devuelto correctamente", candidatos("  use_synth :pro")[0] == "pro" and candidatos("liveloop")[0] == "liveloop"))
+print(f"\n{sum(r)}/{len(r)} comprobaciones correctas")

@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.pyc
+# copia local del codigo fuente de Sonic Pi (solo referencia, 300 MB)
+sonic-pi-src/
+# configuracion y archivos personales
+tema.json
+codigo/
+salida/
+calibracion.json
+docs/NOTAS-internas.md
+*.svg
+*.png
+# TUI de bateria (aparcada): depende de un proyecto externo que no esta en este repo
+src/tui.py
+src/motor.py
+tui.sh
+src/prueba_tui.py
+src/prueba_tui_servidor.py
+src/prueba_vivo.py
+src/prueba_sync.py
+src/prueba_perdidas.py
+src/probar_ritmo.py

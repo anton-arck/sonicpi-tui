@@ -1,7 +1,6 @@
 """Editor de codigo para Sonic Pi en la terminal, solo teclado. Lanza su propio servidor de Sonic Pi (sin ventana).
 Uso: ./editor.sh [archivo.rb]"""
 import json, os, re, sys, threading, time
-from collections import deque
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rich.text import Text
 from textual import work
@@ -128,14 +127,32 @@ def sangria_tras(antes):
 
 
 FLASH_DUR = 0.4          # segundos que tarda en apagarse el destello de una linea
-BUCLE_CUBO = 0.2         # segundos por casilla de la barra de actividad de cada bucle
-BUCLE_N = 24             # casillas (24 * 0.2 s = ~5 s de historia)
-CHISPAS = "▁▂▃▄▅▆▇█"
+PASOS = 16               # cuadros de la linea de pasos que se dibuja junto a cada live_loop (cada vuelta se divide en 16)
 
 def _mezcla(a, b, k):
     """Color intermedio entre dos colores hex: k=0 -> a, k=1 -> b."""
     ca, cb = Color.parse(a).get_truecolor(), Color.parse(b).get_truecolor()
     return Color.from_rgb(*(round(x + (y - x) * k) for x, y in zip(ca, cb)))
+
+def estado_pasos(b, ahora):
+    """Lista de 16 (hay_golpe, es_el_paso_actual). Los golpes salen de la vuelta anterior; el paso actual, de cuanto lleva la vuelta en curso."""
+    P, t0 = b["periodo"], b["t0"]
+    actual = None
+    if P and t0 is not None and ahora - t0 < 3 * P + 1:         # si el bucle se ha parado, el cursor desaparece
+        actual = int(((ahora - t0) / P) % 1 * PASOS)
+    return [(i in b["patron"], i == actual) for i in range(PASOS)]
+
+def segmentos_pasos(b, ahora, T, fondo):
+    """Segmentos de la linea de pasos: 16 cuadros agrupados de 4 en 4, con un espacio a cada lado (21 celdas)."""
+    colores = {(False, False): (T["borde"], False), (True, False): (T["ok"], False), (False, True): (T["acento"], True), (True, True): (T["fg"], True)}
+    segs = [Segment(" ", Style(bgcolor=fondo))]
+    for i, st in enumerate(estado_pasos(b, ahora)):
+        if i and i % 4 == 0: segs.append(Segment(" ", Style(bgcolor=fondo)))
+        c, negrita = colores[st]
+        segs.append(Segment("■", Style(color=c, bgcolor=fondo, bold=negrita)))
+    segs.append(Segment(" ", Style(bgcolor=fondo)))
+    return segs
+ANCHO_PASOS = 1 + PASOS + 3 + 1
 
 def fin_de_bucle(doc, fila):
     """Fila del `end` que cierra el bloque que empieza en `fila` (mismo sangrado), o `fila` si no se encuentra."""
@@ -244,15 +261,24 @@ class Codigo(TextArea):
 
     def render_line(self, y):
         strip = super().render_line(y)
-        if not self.flashes: return strip
-        t0 = self.flashes.get(y + self.scroll_offset.y)
-        if t0 is None: return strip
-        edad = time.monotonic() - t0
-        if edad >= FLASH_DUR: return strip
-        T = TEMAS[self.app.tema]; k = 0.5 * (1 - edad / FLASH_DUR)
-        fondos = {Color.parse(T["bg"]), Color.parse(T["linea"])}          # solo se tine el fondo normal: el cursor y la seleccion se respetan
-        tinte = _mezcla(T["bg"], T["acento"], k)
-        return Strip([Segment(s.text, s.style + Style(bgcolor=tinte), s.control) if s.style and s.style.bgcolor in fondos else s for s in strip], strip.cell_length)
+        fila = y + self.scroll_offset.y
+        T = TEMAS[self.app.tema]
+        t0 = self.flashes.get(fila)
+        if t0 is not None and time.monotonic() - t0 < FLASH_DUR:
+            k = 0.5 * (1 - (time.monotonic() - t0) / FLASH_DUR)
+            fondos = {Color.parse(T["bg"]), Color.parse(T["linea"])}          # solo se tine el fondo normal: el cursor y la seleccion se respetan
+            tinte = _mezcla(T["bg"], T["acento"], k)
+            strip = Strip([Segment(s.text, s.style + Style(bgcolor=tinte), s.control) if s.style and s.style.bgcolor in fondos else s for s in strip], strip.cell_length)
+        # linea de pasos a la derecha de la cabecera de cada live_loop (como el mini scope de la app), si cabe sin tapar codigo
+        for bucle in self.app.bucles.values():
+            if bucle["fila"] == fila and self.scroll_offset.x == 0:
+                vis = min(strip.cell_length, self.scrollable_content_region.width)       # el strip es algo mas ancho que el area visible
+                if vis > ANCHO_PASOS and self.gutter_width + len(self.document.get_line(fila)) + 2 <= vis - ANCHO_PASOS:
+                    izq = strip.crop(0, vis - ANCHO_PASOS)
+                    ultimo = izq._segments[-1].style if izq._segments else None
+                    fondo = (ultimo.bgcolor if ultimo and ultimo.bgcolor else Color.parse(T["bg"]))
+                    return Strip([*izq, *segmentos_pasos(bucle, time.monotonic(), T, fondo)], vis).adjust_cell_length(strip.cell_length, Style(bgcolor=fondo))
+        return strip
 
     # ---------- autocompletado ----------
     def on_text_area_selection_changed(self, event):
@@ -519,7 +545,7 @@ class Editor(App):
     Screen { background: $bg; layers: base overlay; }
     #sugs { layer: overlay; position: absolute; display: none; background: $panel; color: $fg; border: none; padding: 0; }
     #cod { height: 1fr; border: none; background: $bg; }
-    #bucles { display: none; height: auto; max-height: 6; background: $panel; color: $fg; padding: 0 1; }
+    #bucles { display: none; height: auto; max-height: 2; background: $panel; color: $fg; padding: 0 1; }
     #log { display: none; height: 9; background: $bg; border-top: solid $borde; padding: 0 1; }
     #log.visible { display: block; }
     #barra { height: 1; background: $barra; color: $fg; padding: 0 1; }
@@ -552,7 +578,7 @@ class Editor(App):
         self.sucio = False
         self._base = ""                      # texto al cargar/guardar: hay cambios solo si el texto difiere
         self._confirma_salir = False
-        self.bucles = {}                       # nombre -> {"fila", "fin", "hist": deque, "cur": golpes en la casilla actual}
+        self.bucles = {}                       # nombre -> {"fila", "fin", "t0": inicio de la vuelta, "periodo", "actual": golpes de la vuelta en curso (s), "patron": pasos con golpe de la vuelta anterior}
         self._timer_bucles = None
         self._inicial = archivo
 
@@ -627,21 +653,33 @@ class Editor(App):
             self.query_one("#cod").move_cursor((max(0, int(m.group(1)) - 1), 0))
 
     # ---------- destellos y lista de bucles (Sonic Pi 5) ----------
-    def _flash(self, linea):
+    def _flash(self, dato):
+        linea, t = dato if isinstance(dato, tuple) else (dato, time.monotonic())
         cod = self.query_one("#cod", Codigo); fila = linea - 1
         if not 0 <= fila < cod.document.line_count: return
         cod.destello(fila)
-        for b in self.bucles.values():                 # una instruccion interna del bucle (ni la cabecera ni el `end`) = un golpe
-            if b["fila"] < fila < b["fin"]: b["cur"] += 1; break
+        for b in self.bucles.values():
+            if b["fila"] == fila: self._vuelta(b, t)                                     # la cabecera marca el inicio de cada vuelta
+            elif b["fila"] < fila < b["fin"] and b["t0"] is not None: b["actual"].append(t - b["t0"])   # una instruccion interna = un golpe
+
+    @staticmethod
+    def _vuelta(b, t):
+        """Empieza una vuelta nueva del bucle en el instante t: mide el periodo y convierte los golpes de la vuelta que acaba en pasos (0..15)."""
+        if b["t0"] is not None:
+            dt = t - b["t0"]
+            if dt < 0.03: return                       # destello duplicado
+            b["periodo"] = dt if b["periodo"] is None else 0.5 * b["periodo"] + 0.5 * dt
+            b["patron"] = {round(o / dt * PASOS) % PASOS for o in b["actual"]}      # redondeo: un golpe en el instante 0 puede llegar justo antes que la cabecera
+        b["t0"] = t; b["actual"] = []
 
     def _bucle_nuevo(self, nombre, linea):
         doc = self.query_one("#cod", Codigo).document; fila = linea - 1
         if not 0 <= fila < doc.line_count: return
         b = self.bucles.get(nombre)
         if b is None:
-            b = self.bucles[nombre] = {"hist": deque([0] * BUCLE_N, maxlen=BUCLE_N), "cur": 0}
+            b = self.bucles[nombre] = {"t0": None, "periodo": None, "actual": [], "patron": set()}
         b["fila"] = fila; b["fin"] = fin_de_bucle(doc, fila)
-        if self._timer_bucles is None: self._timer_bucles = self.set_interval(BUCLE_CUBO, self._tick_bucles)
+        if self._timer_bucles is None: self._timer_bucles = self.set_interval(1 / 20, self._tick_bucles)
         else: self._timer_bucles.resume()
         self._pintar_bucles()
 
@@ -652,25 +690,20 @@ class Editor(App):
         self.bucles.clear(); self.query_one("#cod", Codigo).flashes.clear(); self._pintar_bucles()
 
     def _tick_bucles(self):
-        for b in self.bucles.values(): b["hist"].append(b["cur"]); b["cur"] = 0
-        self._pintar_bucles()
+        self.query_one("#cod", Codigo).refresh()          # mueve el cursor de la linea de pasos
 
     def _pintar_bucles(self):
+        """Fila con los nombres de los bucles en marcha (su linea de pasos se dibuja junto a su cabecera, en Codigo.render_line)."""
         w = self.query_one("#bucles", Static)
+        self.query_one("#cod", Codigo).refresh()
         if not self.bucles:
             w.display = False
             if self._timer_bucles is not None: self._timer_bucles.pause()
             return
-        T = TEMAS[self.tema]; texto = Text(); nombres = sorted(self.bucles, key=lambda n: self.bucles[n]["fila"])
-        ancho = max(len(n) for n in nombres)
-        for i, n in enumerate(nombres[:6]):
-            if i == 5 and len(nombres) > 6:
-                texto.append(f"+{len(nombres) - 5} bucles mas", style=T["dim"]); break
-            if i: texto.append("\n")
-            b = self.bucles[n]
-            texto.append("● ", style=T["ok"]); texto.append(n.ljust(ancho), style=f"bold {T['acento']}"); texto.append("  ")
-            for h in b["hist"]:
-                texto.append(CHISPAS[min(h, 4) + 3] if h else CHISPAS[0], style=T["ok"] if h else T["borde"])
+        T = TEMAS[self.tema]; texto = Text()
+        for i, n in enumerate(sorted(self.bucles, key=lambda n: self.bucles[n]["fila"])):
+            if i: texto.append("   ")
+            texto.append("● ", style=T["ok"]); texto.append(n, style=f"bold {T['acento']}")
         w.update(texto); w.display = True
     # ---------- acciones ----------
     def ejecutar_nombre(self, nombre):

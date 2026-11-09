@@ -35,6 +35,19 @@ Si Sonic Pi no está en una ruta habitual (`/usr/lib/sonic-pi`, `/opt/sonic-pi`.
 SONICPI_DAEMON=/ruta/a/sonic-pi/server/ruby/bin/daemon.rb SONICPI_RUBY=/ruta/a/ruby ./editor.sh
 ```
 
+### Conservar tu Sonic Pi 4.x aunque instales la 5 (opcional)
+
+`tools/aislar-sonicpi.sh` copia el Sonic Pi 4.x instalado a `~/.local/share/sonicpi-tui/sonic-pi-4.6` (unos 215 MB) y le cambia las rutas fijas del paquete
+para que no dependa de `/usr/lib/sonic-pi` ni de `/usr/share/sonic-pi`. Ejecútalo **antes** de actualizar Sonic Pi. El editor usa esa copia automáticamente
+(con su propia configuración y logs, sin tocar `~/.sonic-pi`) y puedes instalar la 5.0 en el sistema sin que le afecte. Para probar la 5.0 del sistema:
+
+```sh
+SONICPI_USAR=sistema ./editor.sh
+```
+
+La copia sigue usando el motor de audio (`supercollider`, `sc3-plugins`) y las librerías Ruby del sistema; el script imprime el comando de `pacman -D --asexplicit`
+que evita que se traten como paquetes huérfanos al actualizar. Orden de búsqueda del servidor: `SONICPI_DAEMON` > copia aislada > Sonic Pi del sistema.
+
 Los archivos se guardan en `codigo/`. El tema, el estado del log y el último archivo se recuerdan en `tema.json` (no se sube al repositorio).
 
 ## Cómo se maneja
@@ -78,6 +91,7 @@ y otro `Tab` salta al cuerpo del bloque. Los nombres de samples, synths, efectos
 | `src/autocompletar.py` | lógica del autocompletado, sin interfaz |
 | `src/sp_datos.py` | nombres de Sonic Pi 4.6 (generado) |
 | `src/cliente.py` | servidor de Sonic Pi sin ventana y cliente OSC (4.x y 5.x): ejecutar, parar, volumen y logs |
+| `tools/aislar-sonicpi.sh` | copia aislada del Sonic Pi 4.x |
 | `src/falso_daemon.py` | daemon simulado de Sonic Pi 4/5 para probar el cliente sin audio |
 | `src/generar_datos.py` | regenera `sp_datos.py` |
 | `src/prueba_*.py` | pruebas automáticas, sin audio |

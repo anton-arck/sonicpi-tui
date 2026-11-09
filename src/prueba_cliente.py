@@ -44,6 +44,12 @@ r.append(check("puertos 5.x: 6 valores -> version 5 y token en el sexto", leer_p
 r.append(check("salida basura da error legible", "no imprimio los puertos" in (falla("Warning: algo\n") or "")))
 r.append(check("numero de valores raro da error legible", "inesperada" in (falla("1 2 3\n") or "")))
 r.append(check("buscar_daemon respeta SONICPI_DAEMON", cliente.buscar_daemon() == os.environ["SONICPI_DAEMON"]))
+AIS, SIS = cliente.AISLADO_DAEMON, cliente.DAEMONS[0]
+r.append(check("daemon: SONICPI_DAEMON manda sobre todo", cliente.buscar_daemon({"SONICPI_DAEMON": "/x"}, lambda p: True) == "/x"))
+r.append(check("daemon: con copia aislada se prefiere a la del sistema", cliente.buscar_daemon({}, lambda p: True) == AIS))
+r.append(check("daemon: SONICPI_USAR=sistema ignora la copia aislada", cliente.buscar_daemon({"SONICPI_USAR": "sistema"}, lambda p: True) == SIS))
+r.append(check("daemon: sin copia aislada usa la del sistema", cliente.buscar_daemon({}, lambda p: p != AIS) == SIS))
+r.append(check("daemon: Sonic Pi 5 en otra ruta del sistema", cliente.buscar_daemon({}, lambda p: p == cliente.DAEMONS[1]) == cliente.DAEMONS[1]))
 r += sesion("4")
 r += sesion("5")
 r += sesion("5", FALSO_SENAL_5="clockwork")

@@ -3,13 +3,19 @@ Basado en lo que hace /usr/lib/sonic-pi/server/ruby/bin/repl.rb. Solo libreria e
 import html, os, re, socket, struct, subprocess, threading, time
 
 RUBY = os.environ.get("SONICPI_RUBY", "/usr/bin/ruby")                 # el Ruby del sistema (no el de asdf/rbenv)
-# Sitios habituales de daemon.rb: 4.x (paquete del sistema) y 5.x (arbol app/server/...). SONICPI_DAEMON manda sobre todos.
+# Copia aislada de Sonic Pi 4.x (la crea tools/aislar-sonicpi.sh): independiente del que haya instalado en el sistema.
+AISLADO = os.environ.get("SONICPI_TUI_DIR", os.path.expanduser("~/.local/share/sonicpi-tui"))
+AISLADO_DAEMON = f"{AISLADO}/sonic-pi-4.6/lib/server/ruby/bin/daemon.rb"
+# Sitios habituales de daemon.rb en el sistema: 4.x (paquete de Arch) y 5.x (arbol app/server/...).
 DAEMONS = ["/usr/lib/sonic-pi/server/ruby/bin/daemon.rb", "/usr/lib/sonic-pi/app/server/ruby/bin/daemon.rb",
            "/usr/share/sonic-pi/app/server/ruby/bin/daemon.rb", "/opt/sonic-pi/app/server/ruby/bin/daemon.rb"]
 
-def buscar_daemon():
-    if os.environ.get("SONICPI_DAEMON"): return os.environ["SONICPI_DAEMON"]
-    return next((d for d in DAEMONS if os.path.exists(d)), DAEMONS[0])
+def buscar_daemon(env=None, existe=os.path.exists):
+    """Orden: SONICPI_DAEMON > copia aislada de la 4.x (si existe y no pides SONICPI_USAR=sistema) > Sonic Pi del sistema."""
+    env = os.environ if env is None else env
+    if env.get("SONICPI_DAEMON"): return env["SONICPI_DAEMON"]
+    if env.get("SONICPI_USAR") != "sistema" and existe(AISLADO_DAEMON): return AISLADO_DAEMON
+    return next((d for d in DAEMONS if existe(d)), DAEMONS[0])
 
 DAEMON = buscar_daemon()
 
@@ -91,6 +97,8 @@ class SonicPi:
 
     def iniciar(self, timeout=90):
         entorno = {k: v for k, v in os.environ.items() if k not in ("GEM_PATH", "GEM_HOME")}      # como hace repl.rb de 5.0: los gems del usuario ensucian la salida del daemon
+        if DAEMON == AISLADO_DAEMON:                                                           # la copia aislada tiene su propia configuracion y logs, sin tocar ~/.sonic-pi
+            entorno.setdefault("SONIC_PI_HOME", f"{AISLADO}/home")
         self.proc = subprocess.Popen([RUBY, DAEMON], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=entorno)
         linea = self.proc.stdout.readline()
         try:

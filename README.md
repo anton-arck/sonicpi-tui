@@ -18,7 +18,7 @@ Hecho con [Textual](https://textual.textualize.io). Probado en Linux (Arch) con 
 
 ## Requisitos
 
-- **Sonic Pi 4.x o 5.x** instalado (el paquete del sistema; usa su `daemon.rb`). La versión se detecta sola. **4.6 está probada con la app real; el soporte de 5.0 es experimental**: está probado contra un daemon simulado a partir del código fuente de la 5.0, pero no con la app real (pendiente de probar cuando se instale). Si algo falla en 5.0, abre una incidencia con el mensaje del log.
+- **Sonic Pi 4.x o 5.x** instalado (el paquete del sistema; usa su `daemon.rb`). La versión se detecta sola. **Probadas con la app real: 4.6 y 5.0.0** (arranque sin ventana, ejecución de código, logs, errores y cierre; la 5.0 arranca en ~2 s frente a ~6 s de la 4.6). Lo que no está verificado de forma automática es el sonido, ya que las pruebas corren en silencio. Si algo falla, abre una incidencia con el mensaje del log.
 - Python 3.12 o superior y Ruby del sistema.
 - Cierra la ventana de Sonic Pi antes de abrir el editor: no pueden convivir, porque el editor lanza su propio servidor.
 
